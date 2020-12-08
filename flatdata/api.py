@@ -1,11 +1,10 @@
 import json
-from django.db.models import Count, Sum, Avg, Max
+from django.db.models import Count, Sum, Avg, Max, Min
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import viewsets, permissions
 from django.shortcuts import get_object_or_404, get_list_or_404
 from django_filters.rest_framework import DjangoFilterBackend
-from usercenter.models import Department
 from . import serializers
 from . import models
 from .filters import FlatDataFilterSet
@@ -44,6 +43,7 @@ class FlatDataReportConfViewSet(viewsets.ModelViewSet):
 
 
 class FlatDataReportConfCopyView(viewsets.GenericViewSet):
+    lookup_field = 'report_id'
     queryset = models.FlatDataReportConf.objects.order_by('pk')
     serializer_class = serializers.FlatDataReportConfSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -55,6 +55,18 @@ class FlatDataReportConfCopyView(viewsets.GenericViewSet):
         instance.save()
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
+
+
+def dictfetchall(sql, *args):
+    """Returns all rows from a cursor as a dict"""
+    from django.db import connection
+    with connection.cursor() as cursor:
+        cursor.execute(sql, *args)
+        desc = cursor.description
+        return [
+            dict(zip([col[0] for col in desc], row))
+            for row in cursor.fetchall()
+        ]
 
 
 class FlatDataReportView(APIView):
@@ -80,56 +92,116 @@ class FlatDataReportView(APIView):
             raise ValueError('aggregate func type error')
         return value_type_dict[value_type]
 
-    def distinct_count(self, qs, field_name):
-        results = qs.values(field_name).annotate(count=Count(field_name)).order_by()
+    def distinct_count(self, qs, field_name, order_by=None, limit=None, filter_res=None):
+        if filter_res is None:
+            filter_res = {}
+        results = qs.filter(**{field_name + "__isnull": False}, **filter_res).values(field_name).annotate(
+            count=Count(field_name))
+        if order_by:
+            results = results.order_by('count') if order_by == 'ASC' else results.order_by('-count')
+        else:
+            results = results.order_by(field_name)
+        if limit:
+            results = results[:int(limit)]
         data = {}
         for r in results:
             data[str(r[field_name])] = r['count']
         return data
 
-    def distinct_sum(self, qs, field_name, target):
-        results = qs.values(field_name).annotate(sum=Sum(target)).order_by()
+    def distinct_sum(self, qs, field_name, target, order_by=None, limit=None, filter_res=None):
+        if filter_res is None:
+            filter_res = {}
+        results = qs.filter(**{field_name + "__isnull": False}, **filter_res).values(field_name).annotate(
+            sum=Sum(target))
+        if order_by:
+            results = results.order_by('sum') if order_by == 'ASC' else results.order_by('-sum')
+        else:
+            results = results.order_by(field_name)
+        if limit:
+            results = results[:int(limit)]
         data = {}
         for r in results:
             data[str(r[field_name])] = r['sum']
         return data
 
-    def aggregate(self, qs, aggregate_conf):
-        special = ['distinct_count', 'distinct_sum',]
+    def distinct_avg(self, qs, field_name, target, order_by=None, limit=None, filter_res=None):
+        if filter_res is None:
+            filter_res = {}
+        results = qs.filter(**{field_name+"__isnull": False}, **filter_res).values(field_name).annotate(avg=Avg(target))
+        if order_by:
+            results = results.order_by('avg') if order_by == 'ASC' else results.order_by('-avg')
+        else:
+            results = results.order_by(field_name)
+        if limit:
+            results = results[:int(limit)]
+        data = {}
+        for r in results:
+            if not r['avg']:
+                data[str(r[field_name])] = 0
+            else:
+                data[str(r[field_name])] = r['avg']
+        return data
+
+    def aggregate(self, qs, aggregate_conf, header_conf):
+        res = self.date_to_str()
+        special = ['distinct_count', 'distinct_sum', 'distinct_avg']
         result = {}
-        for conf in aggregate_conf:
+        data = []
+        count_index = 0
+        for conf in aggregate_conf['aggregate']:
             func = conf['func']
             field = conf['field']
             output = conf.get('output', field)
+            r_data = {}
             if func in special:
                 if func == 'distinct_count':
-                    r_data = self.distinct_count(qs, field)
+                    r_data = self.distinct_count(qs, field, conf.get('order_by'), conf.get('limit'), res)
                     for k in conf.get('keys', []):
                         r_data[str(k)] = r_data.get(str(k), 0)
                     result[output] = r_data
                 elif func == 'distinct_sum':
-                    r_data = self.distinct_sum(qs, field, conf['target'])
+                    r_data = self.distinct_sum(qs, field, conf['target'], conf.get('order_by'), conf.get('limit'), res)
+                    for k in conf.get('keys', []):
+                        r_data[str(k)] = r_data.get(str(k), 0)
+                    result[output] = r_data
+                elif func == 'distinct_avg':
+                    r_data = self.distinct_avg(qs, field, conf['target'], conf.get('order_by'), conf.get('limit'), res)
                     for k in conf.get('keys', []):
                         r_data[str(k)] = r_data.get(str(k), 0)
                     result[output] = r_data
             else:
                 result[output] = qs.aggregate(**{field: self.aggregate_func(func)(field)})[field]
-        return result
-
-    def render_charts(self, data, conf):
-        dd = {}
-        aggregate_name = conf['aggregate_name']
-        aggre_data = data[aggregate_name]
-        name_map = conf.get('name_map')
-        named_map = {}
-        if name_map:
-            if name_map['to'] == 'department':
-                named_map = {str(i['id']): i['name'] for i in Department.objects.all().values('id', 'name')}
-        for k, v in aggre_data.items():
-            name = str(k)
-            name = named_map.get(name, name)
-            dd[name] = v
-        return dd
+            for k, v in r_data.items():
+                item = {}
+                if count_index == 0:
+                    if header_conf[count_index + 1].get('percent'):
+                        value = v * int(header_conf[count_index + 1].get('percent'))
+                    elif header_conf[count_index + 1].get('eval'):
+                        val = header_conf[count_index + 1].get('eval').format(v)
+                        value = eval(val)
+                    else:
+                        value = v
+                    if header_conf[count_index + 1].get('round'):
+                        value = round(value, int(header_conf[count_index + 1].get('round')))
+                    item[header_conf[count_index]['key']] = k
+                    item[header_conf[count_index + 1]['key']] = value
+                    data.append(item)
+                else:
+                    for d in data:
+                        if d.get(header_conf[count_index + 1]['key']) is None:
+                            if header_conf[count_index + 1].get('percent'):
+                                value = v * int(header_conf[count_index + 1].get('percent'))
+                            elif header_conf[count_index + 1].get('eval'):
+                                val = header_conf[count_index + 1].get('eval').format(v)
+                                value = eval(val)
+                            else:
+                                value = v
+                            if header_conf[count_index + 1].get('round'):
+                                value = round(value, int(header_conf[count_index + 1].get('round')))
+                            d[header_conf[count_index + 1]['key']] = value
+                            break
+            count_index += 1
+        return result, data
 
     def header_clean_data(self, headers, data):
         result = []
@@ -140,37 +212,42 @@ class FlatDataReportView(APIView):
             result.append(r_data)
         return result
 
+    def date_to_str(self):
+        res = {}
+        for key, value in self.request.GET.items():
+            res[key] = value
+        return res
+
     def get(self, request, *args, **kwargs):
         obj = get_object_or_404(self.model, report_id=kwargs['report_id'])
         flat_conf = obj.flat_config
         if flat_conf is None:
-            flat_conf = get_list_or_404(models.FlatConfig, biz_id=obj.biz_id, org_id=obj.org_id, sys_id=obj.sys_id)[0]
+            get_list_or_404(models.FlatConfig, biz_id=obj.biz_id, org_id=obj.org_id, sys_id=obj.sys_id)
         qs = models.FlatData.objects.filter(
             org_id=obj.org_id, sys_id=obj.sys_id, biz_id=obj.biz_id
         )
         arguments_conf = self.parse_json(obj.arguments)
         data_struct_conf = self.parse_json(obj.data_struct)
         charts_struct_conf = self.parse_json(obj.charts_struct)
-        if not arguments_conf or not data_struct_conf or not charts_struct_conf:
-            conf_header = serializers.FlatConfigSerializer(flat_conf).data
-            header = {}
-            for k, v in conf_header.items():
-                if 'field' in k and v:
-                    header[k] = v
-            data = serializers.FlatDataSerializer(
-                qs, many=True
-            ).data
-            return Response({'title': obj.report_name, 'header': header, 'data': self.header_clean_data(header, data)})
-        qs = self.filter_queryset(qs, arguments_conf.get('filter', []))
-        data = serializers.FlatDataSerializer(
-            qs, many=True
-        ).data
-        header = data_struct_conf.get('header', {})
-        result_dict = {'title': obj.report_name, 'header': header, 'data': self.header_clean_data(header, data)}
+
+        # 重写的部分
+        result_dict = {}
+        data = []
         if 'aggregate' in arguments_conf:
-            aggregates = self.aggregate(qs, arguments_conf['aggregate'])
+            aggregates, data = self.aggregate(qs, arguments_conf, data_struct_conf.get('header', {}))
             result_dict['aggreate'] = aggregates
-        if charts_struct_conf:
-            charts = self.render_charts(result_dict.get('aggreate', {}), charts_struct_conf)
-            result_dict['charts'] = charts
+        elif 'sql' in arguments_conf:
+            params = []
+            res = self.date_to_str()
+            if arguments_conf.get('sql_params'):
+                for param in arguments_conf.get('sql_params'):
+                    params.append(res.get(param))
+            data = dictfetchall(arguments_conf.get('sql'), params)
+        charts_struct_conf['detail'] = obj.report_name
+        result_dict['id'] = kwargs['report_id']
+        result_dict['title'] = obj.report_name
+        result_dict['data'] = data
+        result_dict['header'] = data_struct_conf.get('header', {})
+        result_dict['charts'] = charts_struct_conf
+
         return Response(result_dict)

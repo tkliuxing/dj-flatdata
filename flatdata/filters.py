@@ -2,6 +2,10 @@ import django_filters
 from . import models
 
 
+class CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
+    pass
+
+
 class FlatDataFilterSet(django_filters.FilterSet):
     field_01_null = django_filters.BooleanFilter(field_name='field_01', lookup_expr='isnull')
     field_02_null = django_filters.BooleanFilter(field_name='field_02', lookup_expr='isnull')
@@ -64,6 +68,37 @@ class FlatDataFilterSet(django_filters.FilterSet):
     field_28_not = django_filters.CharFilter(field_name='field_28', exclude=True)
     field_29_not = django_filters.CharFilter(field_name='field_29', exclude=True)
     field_30_not = django_filters.CharFilter(field_name='field_30', exclude=True)
+
+    field_01_in = CharInFilter(field_name='field_01', lookup_expr='in')
+    field_02_in = CharInFilter(field_name='field_02', lookup_expr='in')
+    field_03_in = CharInFilter(field_name='field_03', lookup_expr='in')
+    field_04_in = CharInFilter(field_name='field_04', lookup_expr='in')
+    field_05_in = CharInFilter(field_name='field_05', lookup_expr='in')
+    field_06_in = CharInFilter(field_name='field_06', lookup_expr='in')
+    field_07_in = CharInFilter(field_name='field_07', lookup_expr='in')
+    field_08_in = CharInFilter(field_name='field_08', lookup_expr='in')
+    field_09_in = CharInFilter(field_name='field_09', lookup_expr='in')
+    field_10_in = CharInFilter(field_name='field_10', lookup_expr='in')
+    field_11_in = CharInFilter(field_name='field_11', lookup_expr='in')
+    field_12_in = CharInFilter(field_name='field_12', lookup_expr='in')
+    field_13_in = CharInFilter(field_name='field_13', lookup_expr='in')
+    field_14_in = CharInFilter(field_name='field_14', lookup_expr='in')
+    field_15_in = CharInFilter(field_name='field_15', lookup_expr='in')
+    field_16_in = CharInFilter(field_name='field_16', lookup_expr='in')
+    field_17_in = CharInFilter(field_name='field_17', lookup_expr='in')
+    field_18_in = CharInFilter(field_name='field_18', lookup_expr='in')
+    field_19_in = CharInFilter(field_name='field_19', lookup_expr='in')
+    field_20_in = CharInFilter(field_name='field_20', lookup_expr='in')
+    field_21_in = CharInFilter(field_name='field_21', lookup_expr='in')
+    field_22_in = CharInFilter(field_name='field_22', lookup_expr='in')
+    field_23_in = CharInFilter(field_name='field_23', lookup_expr='in')
+    field_24_in = CharInFilter(field_name='field_24', lookup_expr='in')
+    field_25_in = CharInFilter(field_name='field_25', lookup_expr='in')
+    field_26_in = CharInFilter(field_name='field_26', lookup_expr='in')
+    field_27_in = CharInFilter(field_name='field_27', lookup_expr='in')
+    field_28_in = CharInFilter(field_name='field_28', lookup_expr='in')
+    field_29_in = CharInFilter(field_name='field_29', lookup_expr='in')
+    field_30_in = CharInFilter(field_name='field_30', lookup_expr='in')
 
     date_01_year = django_filters.NumberFilter(field_name='date_01', lookup_expr='year')
     date_02_year = django_filters.NumberFilter(field_name='date_02', lookup_expr='year')
